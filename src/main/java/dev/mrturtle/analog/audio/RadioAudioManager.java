@@ -7,9 +7,9 @@ import dev.mrturtle.analog.AnalogPlugin;
 import dev.mrturtle.analog.ModBlocks;
 import dev.mrturtle.analog.block.ReceiverBlockEntity;
 import dev.mrturtle.analog.util.RadioUtil;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -20,13 +20,13 @@ public class RadioAudioManager {
 	public final ArrayList<RadioAudioInstance> activeAudioInstances = new ArrayList<>();
 	public final HashMap<BlockPos, HashMap<BlockPos, RadioAudioInstance>> transmitterAudioInstances = new HashMap<>();
 	public final HashMap<BlockPos, ArrayList<ReceiverAudioData>> receiverAudioPlayers = new HashMap<>();
-	public final HashMap<ServerPlayerEntity, ArrayList<PlayerAudioData>> playerAudioPlayers = new HashMap<>();
+	public final HashMap<ServerPlayer, ArrayList<PlayerAudioData>> playerAudioPlayers = new HashMap<>();
 
-	public void tick(ServerWorld world) {
+	public void tick(ServerLevel world) {
 		// Remove audio instances that are done
 		activeAudioInstances.removeIf((audioInstance) -> audioInstance.isDone);
 
-		for (ServerPlayerEntity player : world.getPlayers()) {
+		for (ServerPlayer player : world.players()) {
 			for (RadioAudioInstance audioInstance : activeAudioInstances) {
 				if (RadioUtil.isReceivingChannel(player, audioInstance.channel))
 					playerReceiverTurnedOn(player, audioInstance.channel);
@@ -61,19 +61,19 @@ public class RadioAudioManager {
 
 			if (!audioPlayers.isEmpty()) {
 				BlockPos receiverPos = entry.getKey();
-				if (world.isChunkLoaded(receiverPos)) {
-					ReceiverBlockEntity receiver = (ReceiverBlockEntity) world.getBlockEntity(receiverPos);
-					receiver.lastAudioPlayedTick = world.getTime();
-					world.updateNeighborsAlways(receiverPos, ModBlocks.RECEIVER_BLOCK);
+				if (world.isLoaded(receiverPos)) {
+					if (world.getBlockEntity(receiverPos) instanceof ReceiverBlockEntity receiver) {
+						receiver.lastAudioPlayedTick = world.getGameTime();
+						world.updateNeighborsAt(receiverPos, ModBlocks.RECEIVER_BLOCK.get());
+					}
 				}
 			}
 		}
 
 		for (BlockPos receiverPos : RadioUtil.getGlobalRadioState(world).getReceivers()) {
-			if (!world.isChunkLoaded(receiverPos))
+			if (!world.isLoaded(receiverPos))
 				continue;
-			ReceiverBlockEntity receiver = (ReceiverBlockEntity) world.getBlockEntity(receiverPos);
-			if (receiver == null)
+			if (!(world.getBlockEntity(receiverPos) instanceof ReceiverBlockEntity receiver))
 				continue;
 			if (!receiver.enabled)
 				continue;
@@ -88,7 +88,7 @@ public class RadioAudioManager {
 
 					boolean alreadyPlaying = false;
 					for (ReceiverAudioData audioPlayer : audioPlayers) {
-                        if (audioPlayer.instance != instance)
+						if (audioPlayer.instance != instance)
 							continue;
 						alreadyPlaying = true;
 					}
@@ -101,7 +101,7 @@ public class RadioAudioManager {
 		}
 	}
 
-	public void receiverTurnedOn(ServerWorld world, BlockPos pos, int receivingChannel) {
+	public void receiverTurnedOn(ServerLevel world, BlockPos pos, int receivingChannel) {
 		for (RadioAudioInstance instance : activeAudioInstances) {
 			if (instance.channel != receivingChannel)
 				continue;
@@ -120,7 +120,7 @@ public class RadioAudioManager {
 		receiverAudioPlayers.remove(pos);
 	}
 
-	public void playerReceiverTurnedOn(ServerPlayerEntity player, int receivingChannel) {
+	public void playerReceiverTurnedOn(ServerPlayer player, int receivingChannel) {
 		ArrayList<PlayerAudioData> audioPlayers = playerAudioPlayers.computeIfAbsent(player, (playerEntity) -> new ArrayList<>());
 
 		for (RadioAudioInstance instance : activeAudioInstances) {
@@ -134,11 +134,11 @@ public class RadioAudioManager {
 				}
 			}
 			if (!alreadyExists)
-				startReceivingAudioInstance(player.getServerWorld(), player, instance);
+				startReceivingAudioInstance(player.serverLevel(), player, instance);
 		}
 	}
 
-	public void playerReceiverTurnedOff(ServerPlayerEntity player, int receivingChannel) {
+	public void playerReceiverTurnedOff(ServerPlayer player, int receivingChannel) {
 		ArrayList<PlayerAudioData> audioPlayers = playerAudioPlayers.get(player);
 		if (audioPlayers == null)
 			return;
@@ -156,10 +156,10 @@ public class RadioAudioManager {
 		playerAudioPlayers.remove(player);
 	}
 
-	public void startReceivingAudioInstance(ServerWorld world, BlockPos pos, RadioAudioInstance instance) {
+	public void startReceivingAudioInstance(ServerLevel world, BlockPos pos, RadioAudioInstance instance) {
 		VoicechatServerApi serverApi = AnalogPlugin.API;
 
-		LocationalAudioChannel channel = serverApi.createLocationalAudioChannel(UUID.randomUUID(), serverApi.fromServerLevel(world), serverApi.createPosition(pos.toCenterPos().getX(), pos.toCenterPos().getY(), pos.toCenterPos().getZ()));
+		LocationalAudioChannel channel = serverApi.createLocationalAudioChannel(UUID.randomUUID(), serverApi.fromServerLevel(world), serverApi.createPosition(pos.getCenter().x, pos.getCenter().y, pos.getCenter().z));
 		if (channel == null)
 			return;
 		// Receivers play arbitrary audio such as music for triple the distance of voices
@@ -173,7 +173,7 @@ public class RadioAudioManager {
 		audioPlayers.add(new ReceiverAudioData(audioPlayer, instance));
 	}
 
-	public void startReceivingAudioInstance(ServerWorld world, ServerPlayerEntity player, RadioAudioInstance instance) {
+	public void startReceivingAudioInstance(ServerLevel world, ServerPlayer player, RadioAudioInstance instance) {
 		VoicechatServerApi serverApi = AnalogPlugin.API;
 
 		LocationalAudioChannel channel = serverApi.createLocationalAudioChannel(UUID.randomUUID(), serverApi.fromServerLevel(world), serverApi.createPosition(player.getX(), player.getY(), player.getZ()));

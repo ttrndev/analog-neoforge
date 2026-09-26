@@ -1,13 +1,14 @@
 {
 	"required": true,
+	"minVersion": "0.8",
 	"package": "dev.mrturtle.analog.mixin",
-	"compatibilityLevel": "JAVA_17",
+	"compatibilityLevel": "JAVA_21",
 	"plugin": "dev.mrturtle.analog.AnalogMixinPlugin",
 	"mixins": [
 		"JukeboxBlockEntityMixin",
 		"JukeboxManagerMixin",
 		"JukeboxManagerMixinSquared",
-		"ServerPlayNetworkHandler"
+		"ServerGamePacketListenerImplMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

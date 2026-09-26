@@ -1,18 +1,16 @@
 package dev.mrturtle.analog;
 
 import dev.mrturtle.analog.item.component.RadioComponent;
-import eu.pb4.polymer.core.api.other.PolymerComponent;
-import net.minecraft.component.ComponentType;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.Registry;
+import net.minecraft.core.component.DataComponentType;
+import net.minecraft.core.registries.Registries;
+import net.neoforged.neoforge.registries.DeferredHolder;
+import net.neoforged.neoforge.registries.DeferredRegister;
 
 public class ModDataComponents {
-	public static final ComponentType<RadioComponent> RADIO = register("radio", ComponentType.<RadioComponent>builder().codec(RadioComponent.CODEC).build());
+	public static final DeferredRegister.DataComponents DATA_COMPONENT_TYPES = DeferredRegister.createDataComponents(Registries.DATA_COMPONENT_TYPE, Analog.MODID);
 
-	public static void initialize() {}
-
-	private static <T> ComponentType<T> register(String id, ComponentType<T> component) {
-		PolymerComponent.registerDataComponent(component);
-		return Registry.register(Registries.DATA_COMPONENT_TYPE, id, component);
-	}
+	public static final DeferredHolder<DataComponentType<?>, DataComponentType<RadioComponent>> RADIO = DATA_COMPONENT_TYPES.registerComponentType(
+			"radio",
+			builder -> builder.persistent(RadioComponent.CODEC).networkSynchronized(RadioComponent.STREAM_CODEC)
+	);
 }

@@ -3,8 +3,8 @@ package dev.mrturtle.analog.util;
 import com.google.common.collect.ImmutableList;
 import de.maxhenkel.voicechat.api.VoicechatServerApi;
 import de.maxhenkel.voicechat.api.packets.MicrophonePacket;
-import dev.mrturtle.analog.ModDataComponents;
 import dev.mrturtle.analog.ModBlocks;
+import dev.mrturtle.analog.ModDataComponents;
 import dev.mrturtle.analog.ModItems;
 import dev.mrturtle.analog.audio.RadioAudioInstance;
 import dev.mrturtle.analog.block.ReceiverBlockEntity;
@@ -12,121 +12,119 @@ import dev.mrturtle.analog.block.TransmitterBlockEntity;
 import dev.mrturtle.analog.config.ConfigManager;
 import dev.mrturtle.analog.item.component.RadioComponent;
 import dev.mrturtle.analog.world.GlobalRadioState;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.PersistentState;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class RadioUtil {
-	public static void transmitOnChannel(VoicechatServerApi serverApi, MicrophonePacket packet, ServerPlayerEntity sender, int senderChannel) {
+	public static void transmitOnChannel(VoicechatServerApi serverApi, MicrophonePacket packet, ServerPlayer sender, int senderChannel) {
 		MinecraftServer server = sender.getServer();
-		ServerWorld world = sender.getServerWorld();
+		if (server == null)
+			return;
+		ServerLevel world = sender.serverLevel();
 		byte[] encodedData = packet.getOpusEncodedData();
-		// This may have been causing issues, and it wasn't even doing anything
-
-		// Decode data
-		/*OpusDecoder decoder = playerDecoders.getOrDefault(sender.getUuid(), serverApi.createDecoder());
-		playerDecoders.putIfAbsent(sender.getUuid(), decoder);
-		if (encodedData.length == 0)
-			decoder.resetState();
-		short[] decodedData = decoder.decode(encodedData);
-		// Apply filter
-		//RadioFilter.applyFilter(decodedData);
-		// Re-Encode data
-		OpusEncoder encoder = playerEncoders.getOrDefault(sender.getUuid(), serverApi.createEncoder());
-		playerEncoders.putIfAbsent(sender.getUuid(), encoder);
-		if (encodedData.length == 0)
-			encoder.resetState();
-		final byte[] voiceData = encoder.encode(decodedData);*/
 
 		// Player radios
-		for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
 			if (player == sender)
 				continue;
 			if (!isReceivingChannel(player, senderChannel))
 				continue;
 			// Play voice to nearby players
-			int listeningDistance = ConfigManager.config.radioListeningDistance * 2;
-			List<PlayerEntity> playersInRange = world.getEntitiesByClass(PlayerEntity.class, Box.of(player.getPos(), listeningDistance, listeningDistance, listeningDistance), (entity) -> true);
-			for (PlayerEntity entity : playersInRange) {
-				// Don't attempt to send packet to player's without a voicechat connection
-				if (serverApi.getConnectionOf(entity.getUuid()) == null)
+			int listeningDistance = ConfigManager.config != null ? ConfigManager.config.radioListeningDistance * 2 : 16;
+			List<Player> playersInRange = world.getEntitiesOfClass(
+					Player.class,
+					AABB.ofSize(player.position(), listeningDistance, listeningDistance, listeningDistance),
+					entity -> true
+			);
+			for (Player entity : playersInRange) {
+				if (serverApi.getConnectionOf(entity.getUUID()) == null)
 					continue;
-				// Prioritize player's handheld radio over another player's radio
 				if (entity != player && entity != sender && isReceivingChannel(entity, senderChannel))
 					continue;
-				serverApi.sendLocationalSoundPacketTo(serverApi.getConnectionOf(entity.getUuid()), packet.locationalSoundPacketBuilder().opusEncodedData(encodedData).position(serverApi.createPosition(player.getX(), player.getY(), player.getZ())).distance(8f).build());
+				serverApi.sendLocationalSoundPacketTo(
+						serverApi.getConnectionOf(entity.getUUID()),
+						packet.locationalSoundPacketBuilder()
+								.opusEncodedData(encodedData)
+								.position(serverApi.createPosition(player.getX(), player.getY(), player.getZ()))
+								.distance(8f)
+								.build()
+				);
 			}
 		}
+
 		// Receivers
 		server.execute(() -> {
 			List<BlockPos> receivers = getGlobalRadioState(world).getReceivers();
 			for (BlockPos receiverPos : receivers) {
-				if (!world.isChunkLoaded(receiverPos))
+				if (!world.isLoaded(receiverPos))
 					continue;
-				ReceiverBlockEntity receiver = (ReceiverBlockEntity) world.getBlockEntity(receiverPos);
-				if (receiver == null)
+				if (!(world.getBlockEntity(receiverPos) instanceof ReceiverBlockEntity receiver))
 					continue;
-				if (!receiver.enabled)
+				if (!receiver.enabled || receiver.channel != senderChannel)
 					continue;
-				if (receiver.channel != senderChannel)
-					continue;
-				receiver.lastAudioPlayedTick = world.getTime();
-				world.updateNeighborsAlways(receiverPos, ModBlocks.RECEIVER_BLOCK);
-				// Play voice to players nearby receiver
-				List<PlayerEntity> playersInRange = world.getEntitiesByClass(PlayerEntity.class, Box.of(receiverPos.toCenterPos(), 64, 64, 64), (entity) -> true);
-				for (PlayerEntity entity : playersInRange) {
-					// Don't attempt to send packet to player's without a voicechat connection
-					if (serverApi.getConnectionOf(entity.getUuid()) == null)
+
+				receiver.lastAudioPlayedTick = world.getGameTime();
+				world.updateNeighborsAt(receiverPos, ModBlocks.RECEIVER_BLOCK.get());
+
+				List<Player> playersInRange = world.getEntitiesOfClass(
+						Player.class,
+						AABB.ofSize(receiverPos.getCenter(), 64, 64, 64),
+						entity -> true
+				);
+				for (Player entity : playersInRange) {
+					if (serverApi.getConnectionOf(entity.getUUID()) == null)
 						continue;
-					// Prioritize player's handheld radio over stationary receiver
 					if (entity != sender && isReceivingChannel(entity, senderChannel))
 						continue;
-					serverApi.sendLocationalSoundPacketTo(serverApi.getConnectionOf(entity.getUuid()), packet.locationalSoundPacketBuilder().opusEncodedData(encodedData).position(serverApi.createPosition(receiverPos.getX(), receiverPos.getY(), receiverPos.getZ())).distance(32f).build());
+					serverApi.sendLocationalSoundPacketTo(
+							serverApi.getConnectionOf(entity.getUUID()),
+							packet.locationalSoundPacketBuilder()
+									.opusEncodedData(encodedData)
+									.position(serverApi.createPosition(receiverPos.getX(), receiverPos.getY(), receiverPos.getZ()))
+									.distance(32f)
+									.build()
+					);
 				}
 			}
 		});
 	}
 
-	public static RadioAudioInstance transmitDataOnChannel(VoicechatServerApi serverApi, ServerWorld world, short[] audioData, int senderChannel) {
+	public static RadioAudioInstance transmitDataOnChannel(VoicechatServerApi serverApi, ServerLevel world, short[] audioData, int senderChannel) {
 		return transmitDataOnChannel(serverApi, world, audioData, senderChannel, null);
 	}
 
-	public static RadioAudioInstance transmitDataOnChannel(VoicechatServerApi serverApi, ServerWorld world, short[] audioData, int senderChannel, Runnable onAudioStopped) {
+	public static RadioAudioInstance transmitDataOnChannel(VoicechatServerApi serverApi, ServerLevel world, short[] audioData, int senderChannel, Runnable onAudioStopped) {
 		RadioAudioInstance audioInstance = new RadioAudioInstance(senderChannel, audioData, onAudioStopped);
 		MinecraftServer server = world.getServer();
 
 		GlobalRadioState globalRadioState = getGlobalRadioState(world);
 		globalRadioState.audioManager.activeAudioInstances.add(audioInstance);
 
-		for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-			// Don't attempt to send packet to player's without a voicechat connection
-			if (serverApi.getConnectionOf(player.getUuid()) == null)
+		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+			if (serverApi.getConnectionOf(player.getUUID()) == null)
 				continue;
 			if (!isReceivingChannel(player, senderChannel))
 				continue;
 			globalRadioState.audioManager.startReceivingAudioInstance(world, player, audioInstance);
 		}
-		// Receivers
+
 		server.execute(() -> {
 			List<BlockPos> receivers = globalRadioState.getReceivers();
 			for (BlockPos receiverPos : receivers) {
-				if (!world.isChunkLoaded(receiverPos))
+				if (!world.isLoaded(receiverPos))
 					continue;
-				ReceiverBlockEntity receiver = (ReceiverBlockEntity) world.getBlockEntity(receiverPos);
-				if (receiver == null)
+				if (!(world.getBlockEntity(receiverPos) instanceof ReceiverBlockEntity receiver))
 					continue;
-				if (!receiver.enabled)
-					continue;
-				if (receiver.channel != senderChannel)
+				if (!receiver.enabled || receiver.channel != senderChannel)
 					continue;
 				globalRadioState.audioManager.startReceivingAudioInstance(world, receiverPos, audioInstance);
 			}
@@ -135,17 +133,19 @@ public class RadioUtil {
 		return audioInstance;
 	}
 
-	public static void transmitOnNearbyTransmitters(VoicechatServerApi serverApi, MicrophonePacket packet, ServerPlayerEntity sender) {
+	public static void transmitOnNearbyTransmitters(VoicechatServerApi serverApi, MicrophonePacket packet, ServerPlayer sender) {
 		MinecraftServer server = sender.getServer();
-		ServerWorld world = sender.getServerWorld();
+		if (server == null)
+			return;
+		ServerLevel world = sender.serverLevel();
 		List<BlockPos> transmitters = getGlobalRadioState(world).getTransmitters();
-		Vec3d pos = sender.getPos();
+		Vec3 pos = sender.position();
 		server.execute(() -> {
+			double maxDist = ConfigManager.config != null ? ConfigManager.config.radioListeningDistance : 8;
 			for (BlockPos transmitterPos : transmitters) {
-				if (pos.distanceTo(transmitterPos.toCenterPos()) > ConfigManager.config.radioListeningDistance)
+				if (pos.distanceTo(transmitterPos.getCenter()) > maxDist)
 					continue;
-				TransmitterBlockEntity transmitter = (TransmitterBlockEntity) world.getBlockEntity(transmitterPos);
-				if (transmitter == null)
+				if (!(world.getBlockEntity(transmitterPos) instanceof TransmitterBlockEntity transmitter))
 					continue;
 				if (!transmitter.enabled)
 					continue;
@@ -154,13 +154,13 @@ public class RadioUtil {
 		});
 	}
 
-	public static boolean isReceivingChannel(PlayerEntity player, int channel) {
-		List<ItemStack> radios = RadioUtil.getRadios(player);
+	public static boolean isReceivingChannel(Player player, int channel) {
+		List<ItemStack> radios = getRadios(player);
 		for (ItemStack stack : radios) {
-			RadioComponent component = stack.getOrDefault(ModDataComponents.RADIO, RadioComponent.DEFAULT);
-			if (!component.enabled())
+			RadioComponent component = stack.get(ModDataComponents.RADIO.get());
+			if (component == null)
 				continue;
-			if (!component.receive())
+			if (!component.enabled() || !component.receive())
 				continue;
 			if (component.channel() != channel)
 				continue;
@@ -169,12 +169,27 @@ public class RadioUtil {
 		return false;
 	}
 
-	public static List<ItemStack> getRadios(PlayerEntity player) {
-		List<List<ItemStack>> inventories = ImmutableList.of(player.getInventory().main, player.getInventory().offHand);
+	public static boolean isRadioEnabled(ItemStack stack) {
+		RadioComponent component = stack.get(ModDataComponents.RADIO.get());
+		return component != null && component.enabled();
+	}
+
+	public static boolean isRadioTransmitting(ItemStack stack) {
+		RadioComponent component = stack.get(ModDataComponents.RADIO.get());
+		return component != null && component.transmit();
+	}
+
+	public static int getRadioChannel(ItemStack stack) {
+		RadioComponent component = stack.get(ModDataComponents.RADIO.get());
+		return component != null ? component.channel() : 0;
+	}
+
+	public static List<ItemStack> getRadios(Player player) {
+		List<List<ItemStack>> inventories = ImmutableList.of(player.getInventory().items, player.getInventory().offhand);
 		List<ItemStack> radios = new ArrayList<>();
 		for (List<ItemStack> inventory : inventories) {
 			for (ItemStack stack : inventory) {
-				if (!stack.isOf(ModItems.RADIO_ITEM))
+				if (!stack.is(ModItems.RADIO_ITEM.get()))
 					continue;
 				radios.add(stack);
 			}
@@ -182,12 +197,7 @@ public class RadioUtil {
 		return radios;
 	}
 
-	public static GlobalRadioState getGlobalRadioState(ServerWorld world) {
-		var type = new PersistentState.Type<>(
-				GlobalRadioState::new,
-				(nbt, wrapperLookup) -> GlobalRadioState.fromNbt(nbt),
-				null
-		);
-		return world.getPersistentStateManager().getOrCreate(type, "globalRadios");
+	public static GlobalRadioState getGlobalRadioState(ServerLevel world) {
+		return world.getDataStorage().computeIfAbsent(GlobalRadioState.factory(), "globalRadios");
 	}
 }

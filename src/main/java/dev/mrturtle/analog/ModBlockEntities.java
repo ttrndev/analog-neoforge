@@ -2,22 +2,21 @@ package dev.mrturtle.analog;
 
 import dev.mrturtle.analog.block.ReceiverBlockEntity;
 import dev.mrturtle.analog.block.TransmitterBlockEntity;
-import eu.pb4.polymer.core.api.block.PolymerBlockUtils;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.BlockEntityType;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.Registry;
-import net.minecraft.util.Identifier;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.neoforged.neoforge.registries.DeferredHolder;
+import net.neoforged.neoforge.registries.DeferredRegister;
 
 public class ModBlockEntities {
-	public static BlockEntityType<TransmitterBlockEntity> TRANSMITTER = register("transmitter", BlockEntityType.Builder.create(TransmitterBlockEntity::new, ModBlocks.TRANSMITTER_BLOCK));
-	public static BlockEntityType<ReceiverBlockEntity> RECEIVER = register("receiver", BlockEntityType.Builder.create(ReceiverBlockEntity::new, ModBlocks.RECEIVER_BLOCK));
+	public static final DeferredRegister<BlockEntityType<?>> BLOCK_ENTITY_TYPES = DeferredRegister.create(Registries.BLOCK_ENTITY_TYPE, Analog.MODID);
 
-	public static void initialize() {}
+	public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<TransmitterBlockEntity>> TRANSMITTER = BLOCK_ENTITY_TYPES.register(
+			"transmitter",
+			() -> BlockEntityType.Builder.of(TransmitterBlockEntity::new, ModBlocks.TRANSMITTER_BLOCK.get()).build(null)
+	);
 
-	public static <T extends BlockEntity> BlockEntityType<T> register(String path, BlockEntityType.Builder<T> builder) {
-		BlockEntityType<T> type = Registry.register(Registries.BLOCK_ENTITY_TYPE, Identifier.of("analog", path), builder.build());
-		PolymerBlockUtils.registerBlockEntity(type);
-		return type;
-	}
+	public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ReceiverBlockEntity>> RECEIVER = BLOCK_ENTITY_TYPES.register(
+			"receiver",
+			() -> BlockEntityType.Builder.of(ReceiverBlockEntity::new, ModBlocks.RECEIVER_BLOCK.get()).build(null)
+	);
 }

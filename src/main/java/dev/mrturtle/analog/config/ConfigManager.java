@@ -3,7 +3,7 @@ package dev.mrturtle.analog.config;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import dev.mrturtle.analog.Analog;
-import net.fabricmc.loader.api.FabricLoader;
+import net.neoforged.fml.loading.FMLPaths;
 
 import java.io.File;
 import java.io.FileReader;
@@ -12,7 +12,7 @@ import java.nio.file.Path;
 
 public class ConfigManager {
 	public static final int CONFIG_VERSION = 1;
-	private static final Path configPath = FabricLoader.getInstance().getConfigDir().resolve("analog.json");
+	private static final Path configPath = FMLPaths.CONFIGDIR.get().resolve("analog.json");
 
 	public static AnalogConfig config;
 

@@ -1,19 +1,20 @@
 package dev.mrturtle.analog.world;
 
 import dev.mrturtle.analog.audio.RadioAudioManager;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtHelper;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.registry.RegistryWrapper;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.PersistentState;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtUtils;
+import net.minecraft.nbt.Tag;
+import net.minecraft.util.datafix.DataFixTypes;
+import net.minecraft.world.level.saveddata.SavedData;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-public class GlobalRadioState extends PersistentState {
+public class GlobalRadioState extends SavedData {
 	private final ArrayList<BlockPos> transmitterList;
 	private final ArrayList<BlockPos> receiverList;
 
@@ -24,26 +25,34 @@ public class GlobalRadioState extends PersistentState {
 		receiverList = new ArrayList<>();
 	}
 
+	public static SavedData.Factory<GlobalRadioState> factory() {
+		return new SavedData.Factory<>(
+				GlobalRadioState::new,
+				GlobalRadioState::load,
+				DataFixTypes.LEVEL
+		);
+	}
+
 	public void createTransmitter(BlockPos pos) {
 		transmitterList.add(pos);
-		markDirty();
+		setDirty();
 	}
 
 	public void removeTransmitter(BlockPos pos) {
 		transmitterList.remove(pos);
 		audioManager.stopTransmitter(pos);
-		markDirty();
+		setDirty();
 	}
 
 	public void createReceiver(BlockPos pos) {
 		receiverList.add(pos);
-		markDirty();
+		setDirty();
 	}
 
 	public void removeReceiver(BlockPos pos) {
 		receiverList.remove(pos);
 		audioManager.receiverTurnedOff(pos);
-		markDirty();
+		setDirty();
 	}
 
 	public List<BlockPos> getTransmitters() {
@@ -54,38 +63,36 @@ public class GlobalRadioState extends PersistentState {
 		return receiverList;
 	}
 
-	public static GlobalRadioState fromNbt(NbtCompound tag) {
+	public static GlobalRadioState load(CompoundTag tag, HolderLookup.Provider registries) {
 		GlobalRadioState state = new GlobalRadioState();
-		NbtList transmitterList = tag.getList("globalTransmitters", NbtElement.COMPOUND_TYPE);
-		for (NbtElement element : transmitterList) {
-			NbtCompound compound = (NbtCompound) element;
-			Optional<BlockPos> pos = NbtHelper.toBlockPos(compound, "pos");
-			if (pos.isPresent())
-				state.transmitterList.add(pos.get());
+		ListTag transmitterList = tag.getList("globalTransmitters", Tag.TAG_COMPOUND);
+		for (int i = 0; i < transmitterList.size(); i++) {
+			CompoundTag compound = transmitterList.getCompound(i);
+			Optional<BlockPos> pos = NbtUtils.readBlockPos(compound, "pos");
+			pos.ifPresent(state.transmitterList::add);
 		}
-		NbtList receiverList = tag.getList("globalReceivers", NbtElement.COMPOUND_TYPE);
-		for (NbtElement element : receiverList) {
-			NbtCompound compound = (NbtCompound) element;
-			Optional<BlockPos> pos = NbtHelper.toBlockPos(compound, "pos");
-			if (pos.isPresent())
-				state.receiverList.add(pos.get());
+		ListTag receiverList = tag.getList("globalReceivers", Tag.TAG_COMPOUND);
+		for (int i = 0; i < receiverList.size(); i++) {
+			CompoundTag compound = receiverList.getCompound(i);
+			Optional<BlockPos> pos = NbtUtils.readBlockPos(compound, "pos");
+			pos.ifPresent(state.receiverList::add);
 		}
 		return state;
 	}
 
 	@Override
-	public NbtCompound writeNbt(NbtCompound tag, RegistryWrapper.WrapperLookup registryLookup) {
-		NbtList transmitterList = new NbtList();
+	public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
+		ListTag transmitterList = new ListTag();
 		for (BlockPos pos : this.transmitterList) {
-			NbtCompound compound = new NbtCompound();
-			compound.put("pos", NbtHelper.fromBlockPos(pos));
+			CompoundTag compound = new CompoundTag();
+			compound.put("pos", NbtUtils.writeBlockPos(pos));
 			transmitterList.add(compound);
 		}
 		tag.put("globalTransmitters", transmitterList);
-		NbtList receiverList = new NbtList();
+		ListTag receiverList = new ListTag();
 		for (BlockPos pos : this.receiverList) {
-			NbtCompound compound = new NbtCompound();
-			compound.put("pos", NbtHelper.fromBlockPos(pos));
+			CompoundTag compound = new CompoundTag();
+			compound.put("pos", NbtUtils.writeBlockPos(pos));
 			receiverList.add(compound);
 		}
 		tag.put("globalReceivers", receiverList);

@@ -3,18 +3,18 @@ package dev.mrturtle.analog.mixin;
 import dev.mrturtle.analog.Analog;
 import dev.mrturtle.analog.access.JukeboxManagerAccessor;
 import dev.mrturtle.analog.util.RadioAudioUtil;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.BlockEntityType;
-import net.minecraft.block.entity.JukeboxBlockEntity;
-import net.minecraft.block.jukebox.JukeboxManager;
-import net.minecraft.block.jukebox.JukeboxSong;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.NbtComponent;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.util.WorldSavePath;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.JukeboxSong;
+import net.minecraft.world.item.JukeboxSongPlayer;
+import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.entity.JukeboxBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.LevelResource;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -28,40 +28,42 @@ import java.util.Optional;
 
 @Mixin(JukeboxBlockEntity.class)
 public abstract class JukeboxBlockEntityMixin extends BlockEntity {
-    @Shadow @Final private JukeboxManager manager;
+    @Shadow @Final private JukeboxSongPlayer jukeboxSongPlayer;
 
     public JukeboxBlockEntityMixin(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
     }
 
-    @Inject(method = "setStack", at = @At("TAIL"))
-    public void setStack(ItemStack stack, CallbackInfo ci) {
-        if (world.isClient)
+    @Inject(method = "setTheItem", at = @At("TAIL"))
+    public void setTheItem(ItemStack stack, CallbackInfo ci) {
+        if (level == null || level.isClientSide())
             return;
 
         boolean isAudioPlayerDisc = false;
-        NbtComponent nbt = stack.get(DataComponentTypes.CUSTOM_DATA);
-        if (nbt != null)
-            if (nbt.copyNbt().containsUuid("CustomSound"))
+        CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
+        if (customData != null) {
+            if (customData.copyTag().hasUUID("CustomSound")) {
                 isAudioPlayerDisc = true;
+            }
+        }
 
-        Optional<RegistryEntry<JukeboxSong>> optionalSongEntry = JukeboxSong.getSongEntryFromStack(world.getRegistryManager(), stack);
-        if (isAudioPlayerDisc) {
-            String songName = "%s".formatted(nbt.copyNbt().getUuid("CustomSound"));
-            Path basePath = world.getServer().getSavePath(WorldSavePath.ROOT).resolve("audio_player_data");
+        Optional<Holder<JukeboxSong>> optionalSongEntry = JukeboxSong.fromStack(level.registryAccess(), stack);
+        if (isAudioPlayerDisc && level.getServer() != null) {
+            String songName = "%s".formatted(customData.copyTag().getUUID("CustomSound"));
+            Path basePath = level.getServer().getWorldPath(LevelResource.ROOT).resolve("audio_player_data");
 
             String songExtension = ".wav";
             if (!Files.exists(basePath.resolve(songName + songExtension)))
                 songExtension = ".mp3";
             try {
-                ((JukeboxManagerAccessor) manager).analog$setCachedAudio(RadioAudioUtil.getAudioData(basePath.resolve(songName + songExtension)));
-                ((JukeboxManagerAccessor) manager).analog$makeNearbyTransmittersPlay(world, true);
+                ((JukeboxManagerAccessor) jukeboxSongPlayer).analog$setCachedAudio(RadioAudioUtil.getAudioData(basePath.resolve(songName + songExtension)));
+                ((JukeboxManagerAccessor) jukeboxSongPlayer).analog$makeNearbyTransmittersPlay(level, true);
             } catch (Exception e) {
-                Analog.LOGGER.error("Failed to load a custom Audio Player music disc for playback from path %s".formatted(songName + songExtension));
+                Analog.LOGGER.error("Failed to load a custom Audio Player music disc for playback from path {}{}", songName, songExtension);
                 e.printStackTrace();
             }
         } else if (optionalSongEntry.isEmpty()) {
-            ((JukeboxManagerAccessor) manager).analog$makeNearbyTransmittersStop(world);
+            ((JukeboxManagerAccessor) jukeboxSongPlayer).analog$makeNearbyTransmittersStop(level);
         }
     }
 }

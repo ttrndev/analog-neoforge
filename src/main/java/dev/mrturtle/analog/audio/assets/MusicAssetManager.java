@@ -1,10 +1,10 @@
 package dev.mrturtle.analog.audio.assets;
 
 import dev.mrturtle.analog.Analog;
-import net.fabricmc.loader.api.FabricLoader;
 import net.lingala.zip4j.ZipFile;
 import net.lingala.zip4j.model.FileHeader;
 import net.minecraft.server.MinecraftServer;
+import net.neoforged.fml.loading.FMLPaths;
 
 import java.io.*;
 import java.net.URI;
@@ -26,10 +26,9 @@ public class MusicAssetManager {
 
 	public static void serverStarted(MinecraftServer server) {
 		new Thread(() -> {
-			if (!FabricLoader.getInstance().getConfigDir().resolve(ASSETS_RECORDS_PATH).toFile().exists()) {
-				if (!FabricLoader.getInstance().getConfigDir().resolve(ASSETS_ZIP_PATH).toFile().exists()) {
+			if (!FMLPaths.CONFIGDIR.get().resolve(ASSETS_RECORDS_PATH).toFile().exists()) {
+				if (!FMLPaths.CONFIGDIR.get().resolve(ASSETS_ZIP_PATH).toFile().exists()) {
 					downloadAssets(server);
-					// downloadAssets calls processAssets when the assets are done downloading
 				} else {
 					processAssets();
 				}
@@ -42,10 +41,10 @@ public class MusicAssetManager {
 	private static void processAssets() {
 		Analog.LOGGER.info("Processing assets for music disc playback, this may take some time...");
 
-		File file = FabricLoader.getInstance().getConfigDir().resolve(ASSETS_ZIP_PATH).toFile();
+		File file = FMLPaths.CONFIGDIR.get().resolve(ASSETS_ZIP_PATH).toFile();
 		try (ZipFile zip = new ZipFile(file)) {
 			FileHeader rootFolderHeader = zip.getFileHeaders().get(0);
-			String exportPath = FabricLoader.getInstance().getConfigDir().resolve(ASSETS_RECORDS_PATH).getParent().toAbsolutePath().toString();
+			String exportPath = FMLPaths.CONFIGDIR.get().resolve(ASSETS_RECORDS_PATH).getParent().toAbsolutePath().toString();
 			zip.extractFile(rootFolderHeader.getFileName() + RECORDS_PATH, exportPath, "records");
 			Analog.LOGGER.info("Successfully processed assets for music disc playback!");
 			recordsLoaded = true;
@@ -59,7 +58,7 @@ public class MusicAssetManager {
 	private static void downloadAssets(MinecraftServer server) {
 		Analog.LOGGER.info("Downloading assets for music disc playback, this may take some time...");
 
-		String versionString = server.getVersion();
+		String versionString = server.getServerVersion();
 		try {
 			HttpClient httpClient = HttpClient.newBuilder()
 					.followRedirects(HttpClient.Redirect.ALWAYS)
@@ -75,11 +74,11 @@ public class MusicAssetManager {
 				try (InputStream stream = response.body()) {
 					byte[] bytes = stream.readAllBytes();
 
-					File analogDirectory = FabricLoader.getInstance().getConfigDir().resolve(ASSETS_ZIP_PATH).getParent().toFile();
+					File analogDirectory = FMLPaths.CONFIGDIR.get().resolve(ASSETS_ZIP_PATH).getParent().toFile();
 					if (!analogDirectory.mkdirs())
 						return;
 
-					File file = FabricLoader.getInstance().getConfigDir().resolve(ASSETS_ZIP_PATH).toFile();
+					File file = FMLPaths.CONFIGDIR.get().resolve(ASSETS_ZIP_PATH).toFile();
 
 					OutputStream outputStream = new FileOutputStream(file);
 					outputStream.write(bytes);

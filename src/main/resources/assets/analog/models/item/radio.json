@@ -1,0 +1,11 @@
+{
+  "parent": "analog:item/radio_off",
+  "overrides": [
+    {
+      "predicate": {
+        "analog:enabled": 1.0
+      },
+      "model": "analog:item/radio_on"
+    }
+  ]
+}

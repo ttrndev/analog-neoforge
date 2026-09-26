@@ -5,14 +5,14 @@ import de.maxhenkel.voicechat.api.events.EventRegistration;
 import de.maxhenkel.voicechat.api.events.MicrophonePacketEvent;
 import de.maxhenkel.voicechat.api.events.VoicechatServerStartedEvent;
 import dev.mrturtle.analog.config.ConfigManager;
-import dev.mrturtle.analog.item.component.RadioComponent;
 import dev.mrturtle.analog.util.RadioUtil;
-import net.minecraft.item.ItemStack;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.Box;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
 
 import java.util.List;
 
+@ForgeVoicechatPlugin
 public class AnalogPlugin implements VoicechatPlugin {
 	public static VoicechatServerApi API;
 
@@ -42,22 +42,25 @@ public class AnalogPlugin implements VoicechatPlugin {
 			return;
 		if (event.getPacket().getOpusEncodedData().length == 0)
 			return;
-		ServerPlayerEntity sourcePlayer = (ServerPlayerEntity) connection.getPlayer().getPlayer();
+		ServerPlayer sourcePlayer = (ServerPlayer) connection.getPlayer().getPlayer();
 		if (sourcePlayer.isSpectator() && !serverApi.getServerConfig().getBoolean("spectator_interaction", false))
 			return;
 		// Find nearby players that might be carrying radios that could transmit
 		sourcePlayer.getServer().execute(() -> {
-			int listeningDistance = ConfigManager.config.radioListeningDistance * 2;
-			List<ServerPlayerEntity> playersInRange = sourcePlayer.getServerWorld().getEntitiesByClass(ServerPlayerEntity.class, Box.of(sourcePlayer.getPos(), listeningDistance, listeningDistance, listeningDistance), (entity) -> true);
-			for (ServerPlayerEntity player : playersInRange) {
+			int listeningDistance = ConfigManager.config != null ? ConfigManager.config.radioListeningDistance * 2 : 16;
+			List<ServerPlayer> playersInRange = sourcePlayer.serverLevel().getEntitiesOfClass(
+					ServerPlayer.class,
+					AABB.ofSize(sourcePlayer.position(), listeningDistance, listeningDistance, listeningDistance),
+					entity -> true
+			);
+			for (ServerPlayer player : playersInRange) {
 				List<ItemStack> radios = RadioUtil.getRadios(player);
 				for (ItemStack stack : radios) {
-					RadioComponent component = stack.getOrDefault(ModDataComponents.RADIO, RadioComponent.DEFAULT);
-					if (!component.enabled())
+					if (!RadioUtil.isRadioEnabled(stack))
 						continue;
-					if (!component.transmit())
+					if (!RadioUtil.isRadioTransmitting(stack))
 						continue;
-					int channel = component.channel();
+					int channel = RadioUtil.getRadioChannel(stack);
 					RadioUtil.transmitOnChannel(serverApi, event.getPacket(), player, channel);
 				}
 			}

@@ -1,97 +1,90 @@
 package dev.mrturtle.analog.block;
 
 import com.mojang.serialization.MapCodec;
-import dev.mrturtle.analog.ModItems;
-import dev.mrturtle.analog.gui.TransmitterBlockGui;
+import dev.mrturtle.analog.client.AnalogClient;
 import dev.mrturtle.analog.util.RadioUtil;
-import eu.pb4.polymer.core.api.block.PolymerBlock;
-import eu.pb4.polymer.virtualentity.api.BlockWithElementHolder;
-import eu.pb4.polymer.virtualentity.api.ElementHolder;
-import net.minecraft.block.*;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.BlockEntityTicker;
-import net.minecraft.block.entity.BlockEntityType;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemPlacementContext;
-import net.minecraft.item.ItemStack;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.state.StateManager;
-import net.minecraft.state.property.DirectionProperty;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.World;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BaseEntityBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.HorizontalDirectionalBlock;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.Nullable;
 
-public class TransmitterBlock extends BlockWithEntity implements PolymerBlock, BlockWithElementHolder {
-	public static final MapCodec<TransmitterBlock> CODEC = createCodec(TransmitterBlock::new);
-	public static final DirectionProperty FACING = HorizontalFacingBlock.FACING;
+public class TransmitterBlock extends BaseEntityBlock {
+	public static final MapCodec<TransmitterBlock> CODEC = simpleCodec(TransmitterBlock::new);
+	public static final DirectionProperty FACING = HorizontalDirectionalBlock.FACING;
 
-	public TransmitterBlock(Settings settings) {
-		super(settings);
-		setDefaultState(getDefaultState().with(FACING, Direction.NORTH));
+	public TransmitterBlock(Properties properties) {
+		super(properties);
+		registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH));
 	}
 
 	@Override
-	protected ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, BlockHitResult hit) {
-		if (world.isClient)
-			return ActionResult.SUCCESS;
-		TransmitterBlockGui gui = new TransmitterBlockGui((ServerPlayerEntity) player, (TransmitterBlockEntity) world.getBlockEntity(pos));
-		gui.open();
-		return ActionResult.SUCCESS;
+	protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
+		if (level.isClientSide()) {
+			if (level.getBlockEntity(pos) instanceof TransmitterBlockEntity transmitter) {
+				AnalogClient.openTransmitterScreen(transmitter);
+			}
+			return InteractionResult.SUCCESS;
+		}
+		return InteractionResult.CONSUME;
 	}
 
 	@Override
-	public void onPlaced(World world, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack itemStack) {
-		RadioUtil.getGlobalRadioState((ServerWorld) world).createTransmitter(pos);
+	public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
+		super.setPlacedBy(level, pos, state, placer, stack);
+		if (!level.isClientSide()) {
+			RadioUtil.getGlobalRadioState((ServerLevel) level).createTransmitter(pos);
+		}
 	}
 
 	@Override
-	public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
-		super.onStateReplaced(state, world, pos, newState, moved);
-		RadioUtil.getGlobalRadioState((ServerWorld) world).removeTransmitter(pos);
+	protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+		if (!state.is(newState.getBlock())) {
+			if (!level.isClientSide()) {
+				RadioUtil.getGlobalRadioState((ServerLevel) level).removeTransmitter(pos);
+			}
+			super.onRemove(state, level, pos, newState, isMoving);
+		}
 	}
 
 	@Nullable
 	@Override
-	public BlockState getPlacementState(ItemPlacementContext ctx) {
-		return this.getDefaultState().with(FACING, ctx.getHorizontalPlayerFacing().getOpposite());
+	public BlockState getStateForPlacement(BlockPlaceContext context) {
+		return defaultBlockState().setValue(FACING, context.getHorizontalDirection().getOpposite());
 	}
 
 	@Override
-	protected void appendProperties(StateManager.Builder<Block, BlockState> builder) {
+	protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
 		builder.add(FACING);
 	}
 
-	@Override
-	public BlockState getPolymerBlockState(BlockState state) {
-		return Blocks.BARRIER.getDefaultState();
-	}
-
-	@Override
-	public @Nullable ElementHolder createElementHolder(ServerWorld world, BlockPos pos, BlockState initialBlockState) {
-		BlockElementHolder elementHolder = new BlockElementHolder(world, pos, ModItems.TRANSMITTER_HOLDER_ITEM);
-		elementHolder.setDirection(initialBlockState.get(FACING));
-		return elementHolder;
-	}
-
 	@Nullable
 	@Override
-	public BlockEntity createBlockEntity(BlockPos pos, BlockState state) {
+	public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
 		return new TransmitterBlockEntity(pos, state);
 	}
 
-	@Nullable
 	@Override
-	public <T extends BlockEntity> BlockEntityTicker<T> getTicker(World world, BlockState state, BlockEntityType<T> type) {
-		return TransmitterBlockEntity::tick;
+	protected RenderShape getRenderShape(BlockState state) {
+		return RenderShape.MODEL;
 	}
 
 	@Override
-	protected MapCodec<? extends BlockWithEntity> getCodec() {
+	protected MapCodec<? extends BaseEntityBlock> codec() {
 		return CODEC;
 	}
 }

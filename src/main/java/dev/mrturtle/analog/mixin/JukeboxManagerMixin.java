@@ -10,19 +10,19 @@ import dev.mrturtle.analog.config.ConfigManager;
 import dev.mrturtle.analog.util.RadioAudioUtil;
 import dev.mrturtle.analog.util.RadioUtil;
 import dev.mrturtle.analog.world.GlobalRadioState;
-import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.jukebox.JukeboxManager;
-import net.minecraft.block.jukebox.JukeboxSong;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.predicate.entity.EntityPredicates;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.WorldAccess;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.EntitySelector;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.JukeboxSong;
+import net.minecraft.world.item.JukeboxSongPlayer;
+import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.fml.loading.FMLPaths;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -33,105 +33,101 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.HashMap;
 
-@Mixin(JukeboxManager.class)
+@Mixin(JukeboxSongPlayer.class)
 public abstract class JukeboxManagerMixin implements JukeboxManagerAccessor {
 	@Shadow public abstract boolean isPlaying();
 
-	@Shadow @Final private BlockPos pos;
+	@Shadow @Final private BlockPos blockPos;
 	@Shadow private long ticksSinceSongStarted;
 	@Unique
 	private short[] cachedAudio = null;
 
-	@Inject(method = "startPlaying", at = @At("TAIL"))
-	public void startPlaying(WorldAccess world, RegistryEntry<JukeboxSong> song, CallbackInfo ci) {
-		if (world.isClient())
+	@Inject(method = "play", at = @At("TAIL"))
+	public void play(LevelAccessor world, Holder<JukeboxSong> song, CallbackInfo ci) {
+		if (world.isClientSide())
 			return;
 
-		// We can't play anything if the record files failed to load, or they aren't loaded yet
 		if (!MusicAssetManager.recordsLoaded) {
-			PlayerEntity closestPlayer = world.getClosestPlayer(pos.getX(), pos.getY(), pos.getZ(), 8, EntityPredicates.EXCEPT_SPECTATOR);
+			Player closestPlayer = world.getNearestPlayer(blockPos.getX(), blockPos.getY(), blockPos.getZ(), 8, EntitySelector.NO_SPECTATORS);
 			if (closestPlayer != null)
-				closestPlayer.sendMessage(Text.translatable("gui.analog.jukebox.asset_failure"), true);
+				closestPlayer.displayClientMessage(Component.translatable("gui.analog.jukebox.asset_failure"), true);
 			return;
 		}
 
-		Identifier songId = song.value().soundEvent().value().getId();
-		// We can only play vanilla records over the radio
+		ResourceLocation songId = song.value().soundEvent().value().getLocation();
 		if (!songId.getNamespace().equals("minecraft"))
 			return;
 
 		cachedAudio = null;
 		String songPath = "analog/records/%s.ogg".formatted(songId.getPath().replace("music_disc.", ""));
 		try {
-			cachedAudio = RadioAudioUtil.getAudioData(FabricLoader.getInstance().getConfigDir().resolve(songPath));
+			cachedAudio = RadioAudioUtil.getAudioData(FMLPaths.CONFIGDIR.get().resolve(songPath));
 		} catch (Exception e) {
-			Analog.LOGGER.error("Failed to load music disc for playback from path %s".formatted(songPath));
+			Analog.LOGGER.error("Failed to load music disc for playback from path {}", songPath);
 			e.printStackTrace();
 		}
 
 		analog$makeNearbyTransmittersPlay(world, true);
 	}
 
-	@Inject(method = "stopPlaying", at = @At("TAIL"))
-	public void stopPlaying(WorldAccess world, BlockState state, CallbackInfo ci) {
-		if (world.isClient())
+	@Inject(method = "stop", at = @At("TAIL"))
+	public void stop(LevelAccessor world, BlockState state, CallbackInfo ci) {
+		if (world.isClientSide())
 			return;
 		analog$makeNearbyTransmittersStop(world);
 	}
 
 	@Inject(method = "tick", at = @At("TAIL"))
-	public void tick(WorldAccess world, BlockState state, CallbackInfo ci) {
+	public void tick(LevelAccessor world, BlockState state, CallbackInfo ci) {
 		if (!isPlaying())
 			return;
 		analog$makeNearbyTransmittersPlay(world, false);
 	}
 
 	@Unique
-	public void analog$makeNearbyTransmittersStop(WorldAccess world) {
-		GlobalRadioState globalRadioState = RadioUtil.getGlobalRadioState((ServerWorld) world);
-		Vec3d center = pos.toCenterPos();
+	public void analog$makeNearbyTransmittersStop(LevelAccessor world) {
+		if (!(world instanceof ServerLevel serverLevel))
+			return;
+		GlobalRadioState globalRadioState = RadioUtil.getGlobalRadioState(serverLevel);
+		Vec3 center = blockPos.getCenter();
 		for (BlockPos transmitterPos : globalRadioState.getTransmitters()) {
-			if (center.distanceTo(transmitterPos.toCenterPos()) > ConfigManager.config.radioListeningDistance)
+			double maxDist = ConfigManager.config != null ? ConfigManager.config.radioListeningDistance : 8;
+			if (center.distanceTo(transmitterPos.getCenter()) > maxDist)
 				continue;
-			TransmitterBlockEntity transmitter = (TransmitterBlockEntity) world.getBlockEntity(transmitterPos);
-			if (transmitter == null)
+			if (!(world.getBlockEntity(transmitterPos) instanceof TransmitterBlockEntity transmitter))
 				continue;
 			if (!transmitter.enabled)
 				continue;
 
-			globalRadioState.audioManager.stopTransmitter(transmitterPos, pos.toImmutable());
+			globalRadioState.audioManager.stopTransmitter(transmitterPos, blockPos.immutable());
 		}
 	}
 
 	@Unique
-	public void analog$makeNearbyTransmittersPlay(WorldAccess world, boolean overrideExisting) {
-		if (cachedAudio == null)
+	public void analog$makeNearbyTransmittersPlay(LevelAccessor world, boolean overrideExisting) {
+		if (cachedAudio == null || !(world instanceof ServerLevel serverLevel))
 			return;
 
-		GlobalRadioState globalRadioState = RadioUtil.getGlobalRadioState((ServerWorld) world);
-		Vec3d center = pos.toCenterPos();
+		GlobalRadioState globalRadioState = RadioUtil.getGlobalRadioState(serverLevel);
+		Vec3 center = blockPos.getCenter();
 		for (BlockPos transmitterPos : globalRadioState.getTransmitters()) {
-			if (center.distanceTo(transmitterPos.toCenterPos()) > ConfigManager.config.radioListeningDistance)
+			double maxDist = ConfigManager.config != null ? ConfigManager.config.radioListeningDistance : 8;
+			if (center.distanceTo(transmitterPos.getCenter()) > maxDist)
 				continue;
-			TransmitterBlockEntity transmitter = (TransmitterBlockEntity) world.getBlockEntity(transmitterPos);
-			if (transmitter == null)
+			if (!(world.getBlockEntity(transmitterPos) instanceof TransmitterBlockEntity transmitter))
 				continue;
 			if (!transmitter.enabled)
 				continue;
 			HashMap<BlockPos, RadioAudioInstance> audioInstances = globalRadioState.audioManager.transmitterAudioInstances.computeIfAbsent(transmitterPos, (playerEntity) -> new HashMap<>());
-			// Only create an audio instance if the transmitter isn't already playing this jukebox's audio
-			// Unless overrideExisting is set, in which case we replace the existing audio
-			if (!audioInstances.containsKey(pos.toImmutable()) || overrideExisting) {
-				// Stop currently playing audio, if it exists
-				if (audioInstances.containsKey(pos.toImmutable()))
-					globalRadioState.audioManager.stopTransmitter(transmitterPos, pos);
+			if (!audioInstances.containsKey(blockPos.immutable()) || overrideExisting) {
+				if (audioInstances.containsKey(blockPos.immutable()))
+					globalRadioState.audioManager.stopTransmitter(transmitterPos, blockPos);
 
-				// If the jukebox was playing before the transmitter was turned on it will need to start at the current part of the song
 				int startIndex = (int) (2400 * ticksSinceSongStarted);
 
-				RadioAudioInstance audioInstance = RadioUtil.transmitDataOnChannel(AnalogPlugin.API, (ServerWorld) world, cachedAudio, transmitter.channel);
+				RadioAudioInstance audioInstance = RadioUtil.transmitDataOnChannel(AnalogPlugin.API, serverLevel, cachedAudio, transmitter.channel);
 				audioInstance.setCurrentIndex(startIndex);
-				audioInstances.put(pos.toImmutable(), audioInstance);
+				audioInstances.put(blockPos.immutable(), audioInstance);
 			}
 		}
 	}
