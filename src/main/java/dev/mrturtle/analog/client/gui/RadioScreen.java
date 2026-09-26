@@ -1,19 +1,35 @@
 package dev.mrturtle.analog.client.gui;
 
+import dev.mrturtle.analog.Analog;
 import dev.mrturtle.analog.ModDataComponents;
 import dev.mrturtle.analog.config.ConfigManager;
 import dev.mrturtle.analog.item.component.RadioComponent;
 import dev.mrturtle.analog.network.ModNetwork;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public class RadioScreen extends Screen {
+	private static final ResourceLocation DISPENSER_TEXTURE = ResourceLocation.withDefaultNamespace("textures/gui/container/dispenser.png");
+	private static final ResourceLocation MAIN_OVERLAY = ResourceLocation.fromNamespaceAndPath(Analog.MODID, "textures/gui/radio/main.png");
+	private static final ResourceLocation NUMBERS_TEXTURE = ResourceLocation.fromNamespaceAndPath(Analog.MODID, "textures/gui/radio/numbers.png");
+
+	private static final ResourceLocation CHANNEL_DOWN_TEXTURE = ResourceLocation.fromNamespaceAndPath(Analog.MODID, "textures/item/gui/radio/channel_down_button.png");
+	private static final ResourceLocation CHANNEL_UP_TEXTURE = ResourceLocation.fromNamespaceAndPath(Analog.MODID, "textures/item/gui/radio/channel_up_button.png");
+	private static final ResourceLocation ENABLE_TEXTURE = ResourceLocation.fromNamespaceAndPath(Analog.MODID, "textures/item/gui/radio/enable_button.png");
+	private static final ResourceLocation DISABLE_TEXTURE = ResourceLocation.fromNamespaceAndPath(Analog.MODID, "textures/item/gui/radio/disable_button.png");
+	private static final ResourceLocation START_RECEIVE_TEXTURE = ResourceLocation.fromNamespaceAndPath(Analog.MODID, "textures/item/gui/radio/start_receive_button.png");
+	private static final ResourceLocation STOP_RECEIVE_TEXTURE = ResourceLocation.fromNamespaceAndPath(Analog.MODID, "textures/item/gui/radio/stop_receive_button.png");
+	private static final ResourceLocation START_TRANSMIT_TEXTURE = ResourceLocation.fromNamespaceAndPath(Analog.MODID, "textures/item/gui/radio/start_transmit_button.png");
+	private static final ResourceLocation STOP_TRANSMIT_TEXTURE = ResourceLocation.fromNamespaceAndPath(Analog.MODID, "textures/item/gui/radio/stop_transmit_button.png");
+
 	private final ItemStack radioStack;
 	private final boolean isMainHand;
 	private int channel;
@@ -21,10 +37,8 @@ public class RadioScreen extends Screen {
 	private boolean transmit;
 	private boolean receive;
 
-	private EditBox channelEditBox;
-	private Button powerButton;
-	private Button transmitButton;
-	private Button receiveButton;
+	private int leftPos;
+	private int topPos;
 
 	public RadioScreen(ItemStack radioStack, InteractionHand hand) {
 		super(Component.translatable("item.analog.radio"));
@@ -41,80 +55,69 @@ public class RadioScreen extends Screen {
 	@Override
 	protected void init() {
 		super.init();
-		int centerX = this.width / 2;
-		int startY = this.height / 2 - 60;
-
-		// Channel controls: [-] [ EditBox ] [+]
-		addRenderableWidget(Button.builder(Component.literal("-"), b -> setChannel(channel - 1))
-				.bounds(centerX - 60, startY, 20, 20)
-				.build());
-
-		channelEditBox = new EditBox(this.font, centerX - 35, startY, 70, 20, Component.translatable("gui.analog.radio.set_channel"));
-		channelEditBox.setValue(String.format("%02d", channel));
-		channelEditBox.setResponder(val -> {
-			try {
-				int parsed = Integer.parseInt(val.trim());
-				int maxChannel = ConfigManager.config != null ? ConfigManager.config.maxRadioChannels - 1 : 99;
-				if (parsed >= 0 && parsed <= maxChannel) {
-					channel = parsed;
-					syncChanges();
-				}
-			} catch (NumberFormatException ignored) {}
-		});
-		addRenderableWidget(channelEditBox);
-
-		addRenderableWidget(Button.builder(Component.literal("+"), b -> setChannel(channel + 1))
-				.bounds(centerX + 40, startY, 20, 20)
-				.build());
-
-		// Power button
-		powerButton = addRenderableWidget(Button.builder(
-				getPowerText(),
-				b -> {
-					enabled = !enabled;
-					powerButton.setMessage(getPowerText());
-					syncChanges();
-				}
-		).bounds(centerX - 60, startY + 25, 120, 20).build());
-
-		// Receive button
-		receiveButton = addRenderableWidget(Button.builder(
-				getReceiveText(),
-				b -> {
-					receive = !receive;
-					receiveButton.setMessage(getReceiveText());
-					syncChanges();
-				}
-		).bounds(centerX - 60, startY + 50, 120, 20).build());
-
-		// Transmit button
-		transmitButton = addRenderableWidget(Button.builder(
-				getTransmitText(),
-				b -> {
-					transmit = !transmit;
-					transmitButton.setMessage(getTransmitText());
-					syncChanges();
-				}
-		).bounds(centerX - 60, startY + 75, 120, 20).build());
+		this.leftPos = (this.width - 176) / 2;
+		this.topPos = (this.height - 166) / 2;
 	}
 
-	private void setChannel(int newChannel) {
+	@Override
+	public boolean mouseClicked(double mouseX, double mouseY, int button) {
+		if (button == 0) {
+			int slot0X = leftPos + 62, slot0Y = topPos + 17;
+			int slot1X = leftPos + 80, slot1Y = topPos + 17;
+			int slot2X = leftPos + 98, slot2Y = topPos + 17;
+			int slot3X = leftPos + 62, slot3Y = topPos + 35;
+			int slot4X = leftPos + 80, slot4Y = topPos + 35;
+			int slot5X = leftPos + 98, slot5Y = topPos + 35;
+
+			if (isHovering(slot0X, slot0Y, mouseX, mouseY)) {
+				playClickSound();
+				setChannel(channel - 1);
+				return true;
+			}
+			if (isHovering(slot1X, slot1Y, mouseX, mouseY)) {
+				playClickSound();
+				Minecraft.getInstance().setScreen(new RadioSelectChannelScreen(this, channel, this::setChannel));
+				return true;
+			}
+			if (isHovering(slot2X, slot2Y, mouseX, mouseY)) {
+				playClickSound();
+				setChannel(channel + 1);
+				return true;
+			}
+			if (isHovering(slot3X, slot3Y, mouseX, mouseY)) {
+				playClickSound();
+				receive = !receive;
+				syncChanges();
+				return true;
+			}
+			if (isHovering(slot4X, slot4Y, mouseX, mouseY)) {
+				playClickSound();
+				enabled = !enabled;
+				syncChanges();
+				return true;
+			}
+			if (isHovering(slot5X, slot5Y, mouseX, mouseY)) {
+				playClickSound();
+				transmit = !transmit;
+				syncChanges();
+				return true;
+			}
+		}
+		return super.mouseClicked(mouseX, mouseY, button);
+	}
+
+	private boolean isHovering(int x, int y, double mouseX, double mouseY) {
+		return mouseX >= x && mouseX < x + 16 && mouseY >= y && mouseY < y + 16;
+	}
+
+	private void playClickSound() {
+		Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0F));
+	}
+
+	public void setChannel(int newChannel) {
 		int maxChannel = ConfigManager.config != null ? ConfigManager.config.maxRadioChannels - 1 : 99;
 		channel = Math.max(0, Math.min(maxChannel, newChannel));
-		channelEditBox.setValue(String.format("%02d", channel));
 		syncChanges();
-	}
-
-	private Component getPowerText() {
-		return Component.translatable(enabled ? "gui.analog.radio.turn_off" : "gui.analog.radio.turn_on");
-	}
-
-	private Component getReceiveText() {
-		return Component.translatable(receive ? "gui.analog.radio.stop_receiving" : "gui.analog.radio.start_receiving");
-	}
-
-	private Component getTransmitText() {
-		return Component.translatable(transmit ? "gui.analog.radio.stop_transmitting" : "gui.analog.radio.start_transmitting");
 	}
 
 	private void syncChanges() {
@@ -123,8 +126,75 @@ public class RadioScreen extends Screen {
 
 	@Override
 	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+		this.renderBackground(guiGraphics, mouseX, mouseY, partialTick);
 		super.render(guiGraphics, mouseX, mouseY, partialTick);
-		guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, this.height / 2 - 75, 0xFFFFFF);
+
+		// 1. Render Dispenser background (176x166)
+		guiGraphics.blit(DISPENSER_TEXTURE, leftPos, topPos, 0, 0, 176, 166);
+
+		// 2. Render Device Overlay (main.png, 62x64)
+		guiGraphics.blit(MAIN_OVERLAY, leftPos + 57, topPos + 11, 0, 0, 62, 64, 62, 64);
+
+		// 3. Render Channel LED Digits
+		renderChannelDigits(guiGraphics, leftPos + 81, topPos + 21, channel);
+
+		// 4. Render 16x16 Pixel Art Buttons
+		int slot0X = leftPos + 62, slot0Y = topPos + 17;
+		int slot1X = leftPos + 80, slot1Y = topPos + 17;
+		int slot2X = leftPos + 98, slot2Y = topPos + 17;
+		int slot3X = leftPos + 62, slot3Y = topPos + 35;
+		int slot4X = leftPos + 80, slot4Y = topPos + 35;
+		int slot5X = leftPos + 98, slot5Y = topPos + 35;
+
+		guiGraphics.blit(CHANNEL_DOWN_TEXTURE, slot0X, slot0Y, 0, 0, 16, 16, 16, 16);
+		guiGraphics.blit(CHANNEL_UP_TEXTURE, slot2X, slot2Y, 0, 0, 16, 16, 16, 16);
+		guiGraphics.blit(receive ? STOP_RECEIVE_TEXTURE : START_RECEIVE_TEXTURE, slot3X, slot3Y, 0, 0, 16, 16, 16, 16);
+		guiGraphics.blit(enabled ? DISABLE_TEXTURE : ENABLE_TEXTURE, slot4X, slot4Y, 0, 0, 16, 16, 16, 16);
+		guiGraphics.blit(transmit ? STOP_TRANSMIT_TEXTURE : START_TRANSMIT_TEXTURE, slot5X, slot5Y, 0, 0, 16, 16, 16, 16);
+
+		// 5. Render Slot Hover Highlight & Tooltips
+		Component hoveredTooltip = null;
+
+		if (isHovering(slot0X, slot0Y, mouseX, mouseY)) {
+			renderSlotHighlight(guiGraphics, slot0X, slot0Y);
+			hoveredTooltip = Component.translatable("gui.analog.radio.channel_down");
+		} else if (isHovering(slot1X, slot1Y, mouseX, mouseY)) {
+			renderSlotHighlight(guiGraphics, slot1X, slot1Y);
+			hoveredTooltip = Component.translatable("gui.analog.radio.set_channel");
+		} else if (isHovering(slot2X, slot2Y, mouseX, mouseY)) {
+			renderSlotHighlight(guiGraphics, slot2X, slot2Y);
+			hoveredTooltip = Component.translatable("gui.analog.radio.channel_up");
+		} else if (isHovering(slot3X, slot3Y, mouseX, mouseY)) {
+			renderSlotHighlight(guiGraphics, slot3X, slot3Y);
+			hoveredTooltip = Component.translatable(receive ? "gui.analog.radio.stop_receiving" : "gui.analog.radio.start_receiving");
+		} else if (isHovering(slot4X, slot4Y, mouseX, mouseY)) {
+			renderSlotHighlight(guiGraphics, slot4X, slot4Y);
+			hoveredTooltip = Component.translatable(enabled ? "gui.analog.radio.turn_off" : "gui.analog.radio.turn_on");
+		} else if (isHovering(slot5X, slot5Y, mouseX, mouseY)) {
+			renderSlotHighlight(guiGraphics, slot5X, slot5Y);
+			hoveredTooltip = Component.translatable(transmit ? "gui.analog.radio.stop_transmitting" : "gui.analog.radio.start_transmitting");
+		}
+
+		if (hoveredTooltip != null) {
+			guiGraphics.renderTooltip(this.font, hoveredTooltip, mouseX, mouseY);
+		}
+	}
+
+	private void renderSlotHighlight(GuiGraphics guiGraphics, int x, int y) {
+		guiGraphics.fillGradient(x, y, x + 16, y + 16, 0x80FFFFFF, 0x80FFFFFF);
+	}
+
+	private void renderChannelDigits(GuiGraphics guiGraphics, int x, int y, int ch) {
+		String text = String.valueOf(ch);
+		if (text.length() == 1)
+			text = "0" + text;
+		for (int i = 0; i < text.length(); i++) {
+			char c = text.charAt(i);
+			if (c >= '0' && c <= '9') {
+				int digit = c - '0';
+				guiGraphics.blit(NUMBERS_TEXTURE, x + i * 8, y, digit * 8, 0, 8, 7, 128, 7);
+			}
+		}
 	}
 
 	@Override

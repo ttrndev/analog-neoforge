@@ -52,7 +52,7 @@ repositories {
 
 dependencies {
     implementation "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
-    runtimeOnly "maven.modrinth:simple-voice-chat:neoforge-1.21.1-2.5.25"
+    runtimeOnly "maven.modrinth:simple-voice-chat:neoforge-1.21.1-2.6.24"
 
     implementation jarJar("net.lingala.zip4j:zip4j:2.11.5")
     implementation jarJar("com.github.trilarion:java-vorbis-support:1.2.1")
